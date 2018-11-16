@@ -1,16 +1,21 @@
 /*
     command-line tool to simplify a ADSP-SC58x/BF70x loader file so as to boot faster
-    Copyright (C) 2015,2016 Peter Lawrence
+    Copyright (C) 2015,2016,2018 Peter Lawrence
 
     This was written to hopefully encourage Analog Devices to fix
-    limitations in their "elfloader" utility and ADSP-SC58x Boot ROM.
+    limitations in their "elfloader" utility and ADSP-SC58x/-BF70x Boot ROM.
 
     Failing that, it might aid engineers trying to optimize boot time.
 
     At the time of writing, the "elfloader" utility fails to merge contiguous 
-    sections into single blocks.  The ADSP-SC58x Boot ROM, in turn, is 
-    inefficient in execution time between blocks, meaning that the inefficiency
-    of "elfloader" can cost dearly in boot times.
+    sections into single blocks.  The ADSP-SC58x and -BF70x Boot ROM, in turn, 
+    is inefficient in execution time between blocks, meaning that the 
+    inefficiency of "elfloader" can cost dearly in boot times.
+
+    This same Boot ROM inefficiency can be seen in small Fill blocks.  The 
+    objective of "elfloader" is to run-length-encode any repeating sequences 
+    of words to achieve "space compression", but the added execution time 
+    due to these smaller blocks overwhelms any small size reductions.
 
     Permission is hereby granted, free of charge, to any person obtaining a 
     copy of this software and associated documentation files (the "Software"), 
@@ -34,6 +39,7 @@
 /*
     20151124 : initial release to Analog Devices (who opened issue CCES-14431)
     20160803 : release of code to github
+    20181115 : unroll small FILL blocks (threshold in CUSTOMIZE_SMALLEST_FILL_BLOCK)
 */
 
 #include <stdio.h>
@@ -83,7 +89,9 @@ static void write_header(FILE *handle, struct block_header_type *hdr);
 static unsigned char calc_header_checksum(struct block_header_type *hdr);
 static void write_image(FILE *handle, struct chunk_list_type *list, struct image_settings_type *settings);
 static void copy_settings(struct image_settings_type *settings, struct block_header_type *hdr);
-static void print_flags(unsigned flags);
+static void print_flags(unsigned flags, unsigned arguments);
+
+#define CUSTOMIZE_SMALLEST_FILL_BLOCK 256
 
 int main(int argc, char *argv[])
 {
@@ -96,6 +104,7 @@ int main(int argc, char *argv[])
 	unsigned additional_bytes;
 	struct image_settings_type settings;
 	unsigned input_block_count, output_block_count;
+	unsigned char *ptr;
 
 	if (argc < 3)
 	{
@@ -139,7 +148,7 @@ int main(int argc, char *argv[])
 		if (!(hdr.block_code.flags & (BFLAG_FIRST | BFLAG_FINAL)))
 		{
 			printf("0x%x 0x%x", hdr.target_address, hdr.byte_count);
-			print_flags(hdr.block_code.flags);
+			print_flags(hdr.block_code.flags, hdr.argument);
 		}
 
 		if (hdr.block_code.flags & (BFLAG_FIRST | BFLAG_FINAL))
@@ -190,11 +199,11 @@ int main(int argc, char *argv[])
 			if (hdr.block_code.flags & ~BFLAG_FILL)
 				goto not_a_match; /* skip check if any bit other than BFLAG_FILL is set; we'll just arrive at the end of the linked list */
 
-			if (hdr.block_code.flags != current->flags)
-				goto not_a_match; /* segregate: keep with like blocks */
+			if ( (hdr.block_code.flags & BFLAG_FILL) && (hdr.byte_count > CUSTOMIZE_SMALLEST_FILL_BLOCK) )
+				goto not_a_match; /* this FILL block is too large to justify unrolling; we'll just arrive at the end of the linked list  */
 
-			if (hdr.argument != hdr.argument)
-				goto not_a_match; /* segregate: keep with blocks using the same argument */
+			if (current->flags & BFLAG_FILL)
+				goto not_a_match; /* segregate: do not join to existing FILL blocks */
 
 			if ( ( hdr.target_address >= current->address ) && ( hdr.target_address <= (current->address + current->length)) )
 			{
@@ -235,7 +244,22 @@ not_a_match:
 		{
 			additional_bytes = (hdr.target_address + hdr.byte_count) - (additional->address + additional->length);
 
-			if (!(hdr.block_code.flags & BFLAG_FILL))
+			if (hdr.block_code.flags & BFLAG_FILL)
+			{
+				/* this is a Fill Block... we append if and only if the current Block isn't also a Fill Block */
+				if (!(additional->flags & BFLAG_FILL))
+				{
+					additional->data = realloc(additional->data, additional->length + additional_bytes);
+					ptr = additional->data + (hdr.target_address - additional->address);
+					while (hdr.byte_count >= sizeof(hdr.argument))
+					{
+						memcpy(ptr, &hdr.argument, sizeof(hdr.argument));
+						ptr += sizeof(hdr.argument);
+						hdr.byte_count -= sizeof(hdr.argument);
+					}
+				}
+			}
+			else
 			{
 				/* this is not a Fill Block, so we read in the data */
 				additional->data = realloc(additional->data, additional->length + additional_bytes);
@@ -321,7 +345,7 @@ static void write_image(FILE *handle, struct chunk_list_type *list, struct image
 	while (current)
 	{
 		printf("0x%x 0x%x", current->address, current->length);
-		print_flags(current->flags);
+		print_flags(current->flags, current->argument);
 
 		position += sizeof(struct block_header_type);
 		if (current->data)
@@ -369,10 +393,10 @@ static void write_image(FILE *handle, struct chunk_list_type *list, struct image
 	}
 }
 
-static void print_flags(unsigned flags)
+static void print_flags(unsigned flags, unsigned argument)
 {
 	if (flags & BFLAG_FILL)
-		printf(" FILL");
+		printf(" FILL (0x%x)", argument);
 	if (flags & BFLAG_INIT)
 		printf(" INIT");
 	printf("\n");
