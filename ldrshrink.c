@@ -139,7 +139,7 @@ int main(int argc, char *argv[])
 		/* stop execution if the checksum failed; the checksum passes only when it calculates to zero */
 		if (checksum)
 		{
-			printf("ERROR: checksum failed @ 0x%02x\n", position);
+			fprintf(stderr, "ERROR: checksum failed @ 0x%02x\n", position);
 			return -1;
 		}
 
@@ -272,7 +272,7 @@ not_a_match:
 		else
 		{
 			if (hdr.byte_count)
-				printf("WARNING: memory overwrite in region 0x%x to 0x%x\n", hdr.target_address, hdr.target_address + hdr.byte_count);
+				fprintf(stderr, "WARNING: memory overwrite in region 0x%x to 0x%x\n", hdr.target_address, hdr.target_address + hdr.byte_count);
 		}
 
 		if (hdr.block_code.flags & BFLAG_INIT)
