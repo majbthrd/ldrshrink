@@ -40,11 +40,13 @@
     20151124 : initial release to Analog Devices (who opened issue CCES-14431)
     20160803 : release of code to github
     20181115 : unroll small FILL blocks (threshold in CUSTOMIZE_SMALLEST_FILL_BLOCK)
+    20181119 : workaround for CCES-17764 (elfloader.exe hard-codes entry address)
 */
 
 #include <stdio.h>
 #include <malloc.h>
 #include <string.h>
+#include <stdlib.h>
 
 /*
 abbreviated and combined information from ADSP-SC58x and ADSP-BF70x Hardware Reference Manuals
@@ -108,7 +110,7 @@ int main(int argc, char *argv[])
 
 	if (argc < 3)
 	{
-		fprintf(stderr, "%s <input_ldr> <output_ldr>\n", argv[0]);
+		fprintf(stderr, "%s <input_ldr> <output_ldr> [entry_addr]\n", argv[0]);
 		return -1;
 	}
 
@@ -172,6 +174,10 @@ int main(int argc, char *argv[])
 			settings.bcode = hdr.block_code.bcode;
 			
 			printf("--- read 0x%02x entry 0x%x\n", hdr.block_code.hdrsign, hdr.target_address);
+
+			if (argc > 3) /* re-write entry address if provided with one */
+				settings.entry_point = strtoul(argv[3], NULL, 0);
+
 			continue;
 		}
 
