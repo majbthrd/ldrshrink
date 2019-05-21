@@ -41,6 +41,7 @@
     20160803 : release of code to github
     20181115 : unroll small FILL blocks (threshold in CUSTOMIZE_SMALLEST_FILL_BLOCK)
     20181119 : workaround for CCES-17764 (elfloader.exe hard-codes entry address)
+    20190521 : bug fix for when input LDR creates overlapping blocks in memory
 */
 
 #include <stdio.h>
@@ -269,7 +270,7 @@ not_a_match:
 			{
 				/* this is not a Fill Block, so we read in the data */
 				additional->data = realloc(additional->data, additional->length + additional_bytes);
-				fread(additional->data + (hdr.target_address - additional->address), 1, additional_bytes, input);
+				fread(additional->data + (hdr.target_address - additional->address), 1, hdr.byte_count, input);
 			}
 
 			/* update the entry length to reflect the added data */
